@@ -9,7 +9,7 @@ default:
 
 release_archive_submodules:
   stage: deploy
-  image: registry.gitlab.com/inivation/infra/docker-files/ubuntu:rolling
+  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:rolling
   interruptible: false
   variables:
     GIT_STRATEGY: clone
@@ -24,7 +24,7 @@ release_archive_submodules:
 
 pages:
   stage: deploy
-  image: registry.gitlab.com/inivation/infra/docker-files/ubuntu:rolling
+  image: registry.gitlab.com/synsense-sys-int/inivation/infra/docker-files/ubuntu:rolling
   interruptible: false
   tags:
     - docker
