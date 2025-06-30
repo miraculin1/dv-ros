@@ -89,10 +89,10 @@ void estimateBias() {
 
 	// Result printing
 	ROS_INFO("Bias estimation is successful!");
-	ROS_INFO_STREAM("Accelerometer biases [x, y, z] in m/s^2: "
-					<< "[" << accBiases.x() << ", " << accBiases.y() << ", " << accBiases.z() << "]");
-	ROS_INFO_STREAM("Gyroscope biases [x, y, z] in rad/s: "
-					<< "[" << gyroBiases.x() << ", " << gyroBiases.y() << ", " << gyroBiases.z() << "]");
+	ROS_INFO_STREAM("Accelerometer biases [x, y, z] in m/s^2: " << "[" << accBiases.x() << ", " << accBiases.y() << ", "
+																<< accBiases.z() << "]");
+	ROS_INFO_STREAM("Gyroscope biases [x, y, z] in rad/s: " << "[" << gyroBiases.x() << ", " << gyroBiases.y() << ", "
+															<< gyroBiases.z() << "]");
 	ROS_INFO_STREAM("Earth gravity vector: [ " << earthG.x() << ", " << earthG.y() << ", " << earthG.z() << " ]");
 }
 

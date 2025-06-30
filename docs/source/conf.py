@@ -71,8 +71,10 @@ html_context['current_version'] = current_version
 html_context['version'] = current_version
 
 html_context['downloads'] = list()
-html_context['downloads'].append(('PDF', '%s-%s.pdf' % (project, current_version)))
-html_context['downloads'].append(('ePub', '%s-%s.epub' % (project, current_version)))
+html_context['downloads'].append(
+    ('PDF', '%s-%s.pdf' % (project, current_version)))
+html_context['downloads'].append(
+    ('ePub', '%s-%s.epub' % (project, current_version)))
 
 # -- Options for EPUB output
 

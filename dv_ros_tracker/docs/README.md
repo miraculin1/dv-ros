@@ -31,8 +31,8 @@ With sharp edges, the feature tracking is improved in terms of accuracy.
 
 Prior information about the camera pose needs to be estimated to provide the tracker with this motion knowledge. This
 estimate can result from IMU pre-integration of a VIO system or other external sensors (e.g., encoders). The
-DV-processing library tracker class accepts the pose prior as a `Transform` type. The ROS wrapper subscribes to
-a `PoseStamped` message type that streams the prior position of the camera and feeds the tracker with the Transform
+DV-processing library tracker class accepts the pose prior as a `Transform` type. The ROS wrapper subscribes to a
+`PoseStamped` message type that streams the prior position of the camera and feeds the tracker with the Transform
 information.
 
 To better guess the camera viewpoint and hence improve the image compensation, depth information about the scene is

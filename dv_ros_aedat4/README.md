@@ -5,6 +5,7 @@ This project provides a stand-alone executable for converting aedat4 files into 
 ## Usage
 
 Call the compiled executable and pass the path to an aedat4 file to convert. Available parameters:
+
 ```
 Usage: ./devel/lib/dv_ros_aedat4/convert_aedat4 [OPTIONS]
 

@@ -504,7 +504,7 @@ void TrackerNode::assembleTrack() {
 			// read transform
 			else if (const dv::kinematics::Transformationf *transform
 					 = std::get_if<dv::kinematics::Transformationf>(&data);
-					 transform != nullptr) {
+				transform != nullptr) {
 				manageTransformsQueue(*transform);
 			}
 			else {

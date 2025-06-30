@@ -7,8 +7,9 @@ C++20 anymore. This can be worked around by using different allocator instead of
 
 ## Usage
 
-To build a ROS node using dv-processing, add `dv_ros_messaging` and `dv_ros_msgs` as
-a dependency in the find catkin call (also add find_package for dv-processing):
+To build a ROS node using dv-processing, add `dv_ros_messaging` and `dv_ros_msgs` as a dependency in the find catkin
+call (also add find_package for dv-processing):
+
 ```cmake
 find_package(catkin REQUIRED COMPONENTS
         ...
@@ -19,6 +20,7 @@ find_package(dv-processing 1.3.0 REQUIRED)
 ```
 
 Libraries and executables using dv-processing features needs to be linked against `dv::processing`:
+
 ```cmake
 target_link_libraries(your_target
         ${catkin_LIBRARIES}
@@ -26,9 +28,10 @@ target_link_libraries(your_target
         )
 ```
 
-When writing a node, make sure to include the `dv_ros_messaging/messaging.hpp` header before any ROS headers
-are included. Use the `DV_ROS_MSGS` macro when declaring types to avoid compilation issues with the std allocator.
-E.g. if you use sensor_msgs::Image type, just wrap the type declaration with the macro:
+When writing a node, make sure to include the `dv_ros_messaging/messaging.hpp` header before any ROS headers are
+included. Use the `DV_ROS_MSGS` macro when declaring types to avoid compilation issues with the std allocator. E.g. if
+you use sensor_msgs::Image type, just wrap the type declaration with the macro:
+
 ```c++
 // Variable declaration
 DV_ROS_MSGS(sensor_msgs::Image) image;
@@ -38,8 +41,8 @@ using ImageMessage = DV_ROS_MSGS(sensor_msgs::Image);
 ImageMessage image;
 ```
 
-The macro command will replace the `std::allocator` with `boost::container::allocator` instead, which has compatible
-API and will allow the code to compile with C++20 features.
+The macro command will replace the `std::allocator` with `boost::container::allocator` instead, which has compatible API
+and will allow the code to compile with C++20 features.
 
 The header will also include modified headers for dynamic reconfiguration compatibility, so this feature can also be
 used without any modifications.
