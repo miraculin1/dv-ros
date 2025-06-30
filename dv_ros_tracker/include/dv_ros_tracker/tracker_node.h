@@ -120,7 +120,7 @@ private:
 	void assembleTrack();
 
 	[[nodiscard]] inline TimedKeypointArrayMessage toRosTimedKeypointArrayMessage(
-		const int64_t timestamp, const dv::cvector<dv::TimedKeyPoint> &keypoints) {
+		const int64_t timestamp, const std::vector<dv::TimedKeyPoint> &keypoints) {
 		TimedKeypointArrayMessage msg;
 
 		msg.header.stamp = dv_ros_msgs::toRosTime(timestamp);
@@ -147,7 +147,7 @@ private:
 
 	void pushTransformToTracker(const dv::kinematics::Transformationf &transform);
 
-	dv::cvector<dv::TimedKeyPoint> undistortKeypoints(const dv::cvector<dv::TimedKeyPoint> &keypoints);
+	std::vector<dv::TimedKeyPoint> undistortKeypoints(const std::vector<dv::TimedKeyPoint> &keypoints);
 
 	bool runTracking();
 

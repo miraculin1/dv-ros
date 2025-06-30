@@ -3,6 +3,8 @@
 #include <dv-processing/camera/calibration_set.hpp>
 #include <dv-processing/camera/calibrations/camera_calibration.hpp>
 #include <dv-processing/core/core.hpp>
+#include <dv-processing/io/camera/davis.hpp>
+#include <dv-processing/io/camera/dvxplorer.hpp>
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/noise/background_activity_noise_filter.hpp>
 
@@ -17,7 +19,6 @@
 #include "SetImuInfoService.h"
 #include "SynchronizeCameraService.h"
 #include "parameters_loader.hpp"
-#include "reader.hpp"
 
 #include <boost/lockfree/spsc_queue.hpp>
 
@@ -89,7 +90,7 @@ private:
 	std::shared_ptr<ros::NodeHandle> mNodeHandle           = nullptr;
 
 	// Declare the Reader to read from the device or from a recording.
-	dv_ros_node::Reader mReader;
+	std::unique_ptr<dv::io::InputBase> mReader;
 
 	// Parameters read from the configuration file. Set to true the type of data that needs to be streamed.
 	dv_ros_node::Params mParams;

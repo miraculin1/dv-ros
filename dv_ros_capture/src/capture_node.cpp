@@ -1,6 +1,7 @@
 #include "../include/dv_ros_capture/capture_node.hpp"
 
 #include <dv-processing/camera/calibrations/camera_calibration.hpp>
+#include <dv-processing/io/camera/discovery.hpp>
 #include <dv-processing/kinematics/transformation.hpp>
 
 #include <fmt/chrono.h>
@@ -19,25 +20,25 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 	mParams(params), mNodeHandle(std::move(nodeHandle)) {
 	mSpinThread = true;
 	if (mParams.aedat4FilePath.empty()) {
-		mReader = dv_ros_node::Reader(mParams.cameraName);
+		mReader = dv::io::camera::open(mParams.cameraName);
 	}
 	else {
-		mReader = dv_ros_node::Reader(mParams.aedat4FilePath, mParams.cameraName);
+		mReader = std::make_unique<dv::io::MonoCameraRecording>(mParams.aedat4FilePath, mParams.cameraName);
 	}
 	startupTime = ros::Time::now();
-	if (mParams.frames && !mReader.isFrameStreamAvailable()) {
+	if (mParams.frames && !mReader->isFrameStreamAvailable()) {
 		mParams.frames = false;
 		ROS_WARN("Frame stream is not available!");
 	}
-	if (mParams.events && !mReader.isEventStreamAvailable()) {
+	if (mParams.events && !mReader->isEventStreamAvailable()) {
 		mParams.events = false;
 		ROS_WARN("Event stream is not available!");
 	}
-	if (mParams.imu && !mReader.isImuStreamAvailable()) {
+	if (mParams.imu && !mReader->isImuStreamAvailable()) {
 		mParams.imu = false;
 		ROS_WARN("Imu data stream is not available!");
 	}
-	if (mParams.triggers && !mReader.isTriggerStreamAvailable()) {
+	if (mParams.triggers && !mReader->isTriggerStreamAvailable()) {
 		mParams.triggers = false;
 		ROS_WARN("Trigger data stream is not available!");
 	}
@@ -82,7 +83,7 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 	if (fs::exists(calibrationPath)) {
 		ROS_INFO_STREAM("Loading calibration file [" << calibrationPath << "]");
 		mCalibration                 = dv::camera::CalibrationSet::LoadFromFile(calibrationPath);
-		const std::string cameraName = mReader.getCameraName();
+		const std::string cameraName = mReader->getCameraName();
 		auto cameraCalibration       = mCalibration.getCameraCalibrationByName(cameraName);
 		if (const auto &imuCalib = mCalibration.getImuCalibrationByName(cameraName); imuCalib.has_value()) {
 			mTransformPublisher = mNodeHandle->advertise<TransformsMessage>("/tf", 100);
@@ -92,8 +93,7 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 			msg.header.frame_id = params.imuFrameName;
 			msg.child_frame_id  = params.cameraFrameName;
 
-			mImuToCamTransform = dv::kinematics::Transformationf(
-				0, Eigen::Matrix<float, 4, 4, Eigen::RowMajor>(imuCalib->transformationToC0.data()));
+			mImuToCamTransform = dv::kinematics::Transformationf(0, imuCalib->transformationToC0.getTransform());
 
 			mAccBiases.x() = imuCalib->accOffsetAvg.x;
 			mAccBiases.y() = imuCalib->accOffsetAvg.y;
@@ -134,13 +134,13 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 	}
 	else {
 		ROS_WARN_STREAM(
-			"[" << mReader.getCameraName() << "] No calibration was found, assuming ideal pinhole (no distortion).");
+			"[" << mReader->getCameraName() << "] No calibration was found, assuming ideal pinhole (no distortion).");
 		std::optional<cv::Size> resolution;
-		if (mReader.isFrameStreamAvailable()) {
-			resolution = mReader.getFrameResolution();
+		if (mReader->isFrameStreamAvailable()) {
+			resolution = mReader->getFrameResolution();
 		}
-		else if (mReader.isEventStreamAvailable()) {
-			resolution = mReader.getEventResolution();
+		else if (mReader->isEventStreamAvailable()) {
+			resolution = mReader->getEventResolution();
 		}
 		if (resolution.has_value()) {
 			const auto width = static_cast<float>(resolution->width);
@@ -153,70 +153,93 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 		}
 	}
 
-	auto &cameraPtr = mReader.getCameraCapturePtr();
-	if (cameraPtr != nullptr) {
-		if (cameraPtr->isFrameStreamAvailable()) {
-			// DAVIS camera
-			davisColorServer = std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::DAVISConfig>>(
-				mReaderMutex, *mNodeHandle);
-			dv_ros_capture::DAVISConfig initialSettings    = dv_ros_capture::DAVISConfig::__getDefault__();
-			initialSettings.noise_filtering                = mParams.noiseFiltering;
-			initialSettings.noise_background_activity_time = static_cast<int>(mParams.noiseBATime);
-			davisColorServer->updateConfig(initialSettings);
-			davisColorServer->setCallback([this, &cameraPtr](const dv_ros_capture::DAVISConfig &config, uint32_t) {
-				cameraPtr->setDavisColorMode(static_cast<dv::io::CameraCapture::DavisColorMode>(config.color_mode));
-				cameraPtr->setDavisReadoutMode(
-					static_cast<dv::io::CameraCapture::DavisReadoutMode>(config.readout_mode));
-				if (config.auto_exposure) {
-					cameraPtr->enableDavisAutoExposure();
-				}
-				else {
-					cameraPtr->setDavisExposureDuration(dv::Duration(config.exposure));
-				}
-				updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
-			});
+	auto *davis = dynamic_cast<dv::io::camera::DAVIS *>(mReader.get());
+	if (davis != nullptr) {
+		// DAVIS camera
+		davisColorServer
+			= std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::DAVISConfig>>(mReaderMutex, *mNodeHandle);
 
-			if (cameraPtr->isTriggerStreamAvailable()) {
-				// External trigger detection support for DAVIS346 - MODIFY HERE FOR DIFFERENT DETECTION SETTINGS!
-				cameraPtr->deviceConfigSet(DAVIS_CONFIG_EXTINPUT, DAVIS_CONFIG_EXTINPUT_DETECT_RISING_EDGES, true);
-				cameraPtr->deviceConfigSet(DAVIS_CONFIG_EXTINPUT, DAVIS_CONFIG_EXTINPUT_DETECT_FALLING_EDGES, false);
-				cameraPtr->deviceConfigSet(DAVIS_CONFIG_EXTINPUT, DAVIS_CONFIG_EXTINPUT_DETECT_PULSES, false);
-				cameraPtr->deviceConfigSet(DAVIS_CONFIG_EXTINPUT, DAVIS_CONFIG_EXTINPUT_RUN_DETECTOR, mParams.triggers);
-			}
-		}
-		else {
-			// DVXplorer type camera
-			dvxplorerServer = std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::DVXplorerConfig>>(
-				mReaderMutex, *mNodeHandle);
-			dv_ros_capture::DVXplorerConfig initialSettings = dv_ros_capture::DVXplorerConfig::__getDefault__();
-			initialSettings.noise_filtering                 = mParams.noiseFiltering;
-			initialSettings.noise_background_activity_time  = static_cast<int>(mParams.noiseBATime);
-			dvxplorerServer->updateConfig(initialSettings);
-			dvxplorerServer->setCallback([this, &cameraPtr](const dv_ros_capture::DVXplorerConfig &config, uint32_t) {
-				cameraPtr->setDVSGlobalHold(config.global_hold);
-				cameraPtr->setDVSBiasSensitivity(
-					static_cast<dv::io::CameraCapture::BiasSensitivity>(config.bias_sensitivity));
-				updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
-			});
+		dv_ros_capture::DAVISConfig initialSettings    = dv_ros_capture::DAVISConfig::__getDefault__();
+		initialSettings.noise_filtering                = mParams.noiseFiltering;
+		initialSettings.noise_background_activity_time = static_cast<int>(mParams.noiseBATime);
 
-			if (cameraPtr->isTriggerStreamAvailable()) {
-				// External trigger detection support for DVXplorer - MODIFY HERE FOR DIFFERENT DETECTION SETTINGS!
-				cameraPtr->deviceConfigSet(DVX_EXTINPUT, DVX_EXTINPUT_DETECT_RISING_EDGES, true);
-				cameraPtr->deviceConfigSet(DVX_EXTINPUT, DVX_EXTINPUT_DETECT_FALLING_EDGES, false);
-				cameraPtr->deviceConfigSet(DVX_EXTINPUT, DVX_EXTINPUT_DETECT_PULSES, false);
-				cameraPtr->deviceConfigSet(DVX_EXTINPUT, DVX_EXTINPUT_RUN_DETECTOR, mParams.triggers);
+		davisColorServer->updateConfig(initialSettings);
+		davisColorServer->setCallback([this, &davis](const dv_ros_capture::DAVISConfig &config, uint32_t) {
+			davis->setColorMode(static_cast<dv::io::camera::parser::DAVIS::ColorMode>(config.color_mode));
+
+			if (config.readout_mode == 1) {
+				davis->setEventsRunning(true);
+				davis->setFramesRunning(false);
 			}
+			else if (config.readout_mode == 2) {
+				davis->setEventsRunning(false);
+				davis->setFramesRunning(true);
+			}
+			else {
+				davis->setEventsRunning(true);
+				davis->setFramesRunning(true);
+			}
+
+			if (config.auto_exposure) {
+				davis->setAutoExposure(true);
+			}
+			else {
+				davis->setAutoExposure(false);
+				davis->setExposureDuration(std::chrono::microseconds{config.exposure});
+			}
+
+			updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
+		});
+
+		if (davis->isTriggerStreamAvailable()) {
+			// External trigger detection support for DAVIS346 - MODIFY HERE FOR DIFFERENT DETECTION SETTINGS!
+			davis->setDetectorRisingEdges(true);
+			davis->setDetectorRisingEdges(false);
+			davis->setDetectorRunning(mParams.triggers);
 		}
 
 		// Support variable data interval sizes.
-		cameraPtr->deviceConfigSet(CAER_HOST_CONFIG_PACKETS, CAER_HOST_CONFIG_PACKETS_MAX_CONTAINER_INTERVAL, mParams.timeIncrement);
+		davis->setTimeInterval(std::chrono::microseconds{mParams.timeIncrement});
 	}
-	else {
+
+	auto *dvxplorer = dynamic_cast<dv::io::camera::DVXplorer *>(mReader.get());
+	if (dvxplorer != nullptr) {
+		// DVXplorer type camera
+		dvxplorerServer = std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::DVXplorerConfig>>(
+			mReaderMutex, *mNodeHandle);
+
+		dv_ros_capture::DVXplorerConfig initialSettings = dv_ros_capture::DVXplorerConfig::__getDefault__();
+		initialSettings.noise_filtering                 = mParams.noiseFiltering;
+		initialSettings.noise_background_activity_time  = static_cast<int>(mParams.noiseBATime);
+
+		dvxplorerServer->updateConfig(initialSettings);
+		dvxplorerServer->setCallback([this, &dvxplorer](const dv_ros_capture::DVXplorerConfig &config, uint32_t) {
+			dvxplorer->setGlobalHold(config.global_hold);
+			dvxplorer->setContrastThresholdOn(config.contrast_threshold_on);
+			dvxplorer->setContrastThresholdOff(config.contrast_threshold_off);
+
+			updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
+		});
+
+		if (dvxplorer->isTriggerStreamAvailable()) {
+			// External trigger detection support for DVXplorer - MODIFY HERE FOR DIFFERENT DETECTION SETTINGS!
+			dvxplorer->setDetectorRisingEdges(true);
+			dvxplorer->setDetectorRisingEdges(false);
+			dvxplorer->setDetectorRunning(mParams.triggers);
+		}
+
+		// Support variable data interval sizes.
+		dvxplorer->setTimeInterval(std::chrono::microseconds{mParams.timeIncrement});
+	}
+
+	if (dynamic_cast<dv::io::MonoCameraRecording *>(mReader.get()) != nullptr) {
 		playbackServer
 			= std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::PlaybackConfig>>(mReaderMutex, *mNodeHandle);
+
 		dv_ros_capture::PlaybackConfig initialSettings = dv_ros_capture::PlaybackConfig::__getDefault__();
 		initialSettings.noise_filtering                = mParams.noiseFiltering;
 		initialSettings.noise_background_activity_time = static_cast<int>(mParams.noiseBATime);
+
 		playbackServer->updateConfig(initialSettings);
 		playbackServer->setCallback([this](const dv_ros_capture::PlaybackConfig &config, uint32_t) {
 			updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
@@ -231,13 +254,13 @@ void CaptureNode::populateInfoMsg(const dv::camera::CameraGeometry &cameraGeomet
 	const auto distortion = cameraGeometry.getDistortion();
 
 	switch (cameraGeometry.getDistortionModel()) {
-		case dv::camera::DistortionModel::Equidistant: {
+		case dv::camera::DistortionModel::EQUIDISTANT: {
 			mCameraInfoMsg.distortion_model = sensor_msgs::distortion_models::EQUIDISTANT;
 			mCameraInfoMsg.D.assign(distortion.begin(), distortion.end());
 			break;
 		}
 
-		case dv::camera::DistortionModel::RadTan: {
+		case dv::camera::DistortionModel::RADIAL_TANGENTIAL: {
 			mCameraInfoMsg.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
 			mCameraInfoMsg.D.assign(distortion.begin(), distortion.end());
 			if (mCameraInfoMsg.D.size() < 5) {
@@ -246,7 +269,7 @@ void CaptureNode::populateInfoMsg(const dv::camera::CameraGeometry &cameraGeomet
 			break;
 		}
 
-		case dv::camera::DistortionModel::None: {
+		case dv::camera::DistortionModel::NONE: {
 			mCameraInfoMsg.distortion_model = sensor_msgs::distortion_models::PLUMB_BOB;
 			mCameraInfoMsg.D                = {0.0, 0.0, 0.0, 0.0, 0.0};
 			break;
@@ -322,14 +345,14 @@ bool CaptureNode::synchronizeCamera(
 	// Assume failure case
 	rsp.success = false;
 
-	auto &liveCapture = mReader.getCameraCapturePtr();
+	auto *liveCapture = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
 	if (!liveCapture) {
 		ROS_WARN("Received synchronization request on a non-live camera!");
 		return true;
 	}
-	if (liveCapture->isConnected() && !liveCapture->isMasterCamera()) {
+	if (liveCapture->isRunning() && !liveCapture->isMaster()) {
 		// Update the timestamp offset
-		liveCapture->setTimestampOffset(req.timestampOffset);
+		liveCapture->setTimestampOffset(std::chrono::microseconds{req.timestampOffset});
 		ROS_INFO_STREAM("Camera [" << liveCapture->getCameraName() << "] synchronized: timestamp offset updated.");
 		rsp.cameraName = liveCapture->getCameraName();
 		rsp.success    = true;
@@ -371,7 +394,7 @@ bool CaptureNode::setImuInfo(dv_ros_capture::SetImuInfo::Request &req, dv_ros_ca
 
 fs::path CaptureNode::getCameraCalibrationDirectory(const bool createDirectories) const {
 	const fs::path directory
-		= fmt::format("{0}/.dv_camera/camera_calibration/{1}", std::getenv("HOME"), mReader.getCameraName());
+		= fmt::format("{0}/.dv_camera/camera_calibration/{1}", std::getenv("HOME"), mReader->getCameraName());
 	if (createDirectories && !fs::exists(directory)) {
 		fs::create_directories(directory);
 	}
@@ -391,7 +414,7 @@ void CaptureNode::generateActiveCalibrationFile() {
 fs::path CaptureNode::saveCalibration() {
 	auto date = fmt::format("{:%Y_%m_%d_%H_%M_%S}", dv::toTimePoint(dv::now()));
 	const std::string calibrationFileName
-		= fmt::format("calibration_camera_{0}_{1}.json", mReader.getCameraName(), date);
+		= fmt::format("calibration_camera_{0}_{1}.json", mReader->getCameraName(), date);
 	const fs::path calibPath = getCameraCalibrationDirectory() / calibrationFileName;
 	updateCalibrationSet();
 	mCalibration.writeToFile(calibPath);
@@ -402,7 +425,7 @@ fs::path CaptureNode::saveCalibration() {
 
 void CaptureNode::updateCalibrationSet() {
 	ROS_INFO("Generating calibration set...");
-	const std::string cameraName = mReader.getCameraName();
+	const std::string cameraName = mReader->getCameraName();
 	dv::camera::calibrations::CameraCalibration calib;
 	bool calibrationExists = false;
 	if (auto camCalibration = mCalibration.getCameraCalibrationByName(cameraName); camCalibration.has_value()) {
@@ -416,10 +439,10 @@ void CaptureNode::updateCalibrationSet() {
 	calib.distortion.clear();
 	calib.distortion.assign(mCameraInfoMsg.D.begin(), mCameraInfoMsg.D.end());
 	if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::PLUMB_BOB) {
-		calib.distortionModel = dv::camera::DistortionModel::RadTan;
+		calib.distortionModel = dv::camera::DistortionModel::RADIAL_TANGENTIAL;
 	}
 	else if (static_cast<std::string>(mCameraInfoMsg.distortion_model) == sensor_msgs::distortion_models::EQUIDISTANT) {
-		calib.distortionModel = dv::camera::DistortionModel::Equidistant;
+		calib.distortionModel = dv::camera::DistortionModel::EQUIDISTANT;
 	}
 	else {
 		throw dv::exceptions::InvalidArgument<dv_ros_msgs::CameraInfoMessage::_distortion_model_type>(
@@ -429,7 +452,7 @@ void CaptureNode::updateCalibrationSet() {
 	calib.principalPoint
 		= cv::Point2f(static_cast<float>(mCameraInfoMsg.K[2]), static_cast<float>(mCameraInfoMsg.K[5]));
 
-	calib.transformationToC0 = {1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f, 0.f, 0.f, 0.f, 0.f, 1.f};
+	calib.transformationToC0 = dv::kinematics::Transformationf{};
 
 	if (calibrationExists) {
 		mCalibration.updateCameraCalibration(calib);
@@ -450,7 +473,7 @@ void CaptureNode::updateCalibrationSet() {
 	bool imuHasValues = false;
 	if ((mImuToCamTransforms.has_value() && !mImuToCamTransforms->transforms.empty())) {
 		const Eigen::Matrix4f mat         = mImuToCamTransform.getTransform().transpose();
-		imuCalibration.transformationToC0 = std::vector<float>(mat.data(), mat.data() + mat.rows() * mat.cols());
+		imuCalibration.transformationToC0 = dv::kinematics::Transformationf{0, mat};
 		imuHasValues                      = true;
 	}
 
@@ -483,9 +506,8 @@ void CaptureNode::updateCalibrationSet() {
 
 void CaptureNode::startCapture() {
 	ROS_INFO("Spinning capture node.");
-	auto times = mReader.getTimeRange();
 
-	const auto &liveCapture = mReader.getCameraCapturePtr();
+	auto *liveCapture = dynamic_cast<dv::io::camera::CameraInputBase *>(mReader.get());
 	// If the pointer is valid - the reader is handling a live camera
 	if (liveCapture) {
 		mSynchronized = false;
@@ -495,8 +517,10 @@ void CaptureNode::startCapture() {
 		mSynchronized = true;
 	}
 
-	if (times.has_value()) {
-		mClock = std::thread(&CaptureNode::clock, this, times->first, times->second, mParams.timeIncrement);
+	auto *fileCapture = dynamic_cast<dv::io::MonoCameraRecording *>(mReader.get());
+	if (fileCapture) {
+		const auto times = fileCapture->getTimeRange();
+		mClock           = std::thread(&CaptureNode::clock, this, times.first, times.second, mParams.timeIncrement);
 	}
 	else {
 		mClock = std::thread(&CaptureNode::clock, this, -1, -1, mParams.timeIncrement);
@@ -538,7 +562,7 @@ void CaptureNode::updateNoiseFilter(const bool enable, const int64_t backgroundA
 		// Create the filter and return
 		if (mNoiseFilter == nullptr) {
 			mNoiseFilter = std::make_unique<dv::noise::BackgroundActivityNoiseFilter<>>(
-				mReader.getEventResolution().value(), dv::Duration(backgroundActivityTime));
+				mReader->getEventResolution().value(), dv::Duration(backgroundActivityTime));
 			return;
 		}
 
@@ -561,7 +585,7 @@ void CaptureNode::clock(int64_t start, int64_t end, int64_t timeIncrement) {
 		start         = std::numeric_limits<int64_t>::max() - 1;
 		end           = std::numeric_limits<int64_t>::max();
 		timeIncrement = 0;
-		ROS_INFO_STREAM("Reading from camera [" << mReader.getCameraName() << "]...");
+		ROS_INFO_STREAM("Reading from camera [" << mReader->getCameraName() << "]...");
 	}
 
 	while (mSpinThread) {
@@ -583,7 +607,7 @@ void CaptureNode::clock(int64_t start, int64_t end, int64_t timeIncrement) {
 
 		sleepRate.sleep();
 		// EOF or reader is disconnected
-		if (start >= end || !mReader.isConnected()) {
+		if (start >= end || !mReader->isRunning()) {
 			mSpinThread = false;
 		}
 	}
@@ -626,7 +650,7 @@ void CaptureNode::framePublisher() {
 		mFrameQueue.consume_all([&](const int64_t timestamp) {
 			if (!frame.has_value()) {
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				frame = mReader.getNextFrame();
+				frame = mReader->getNextFrame();
 			}
 			while (frame.has_value() && timestamp >= frame->timestamp) {
 				if (mFramePublisher.getNumSubscribers() > 0) {
@@ -637,7 +661,7 @@ void CaptureNode::framePublisher() {
 				mCurrentSeek = frame->timestamp;
 
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				frame = mReader.getNextFrame();
+				frame = mReader->getNextFrame();
 			}
 		});
 		std::this_thread::sleep_for(100us);
@@ -647,13 +671,13 @@ void CaptureNode::framePublisher() {
 void CaptureNode::imuPublisher() {
 	ROS_INFO("Spinning imuPublisher");
 
-	std::optional<dv::cvector<dv::IMU>> imuData = std::nullopt;
+	std::optional<std::vector<dv::IMU>> imuData = std::nullopt;
 
 	while (mSpinThread) {
 		mImuQueue.consume_all([&](const int64_t timestamp) {
 			if (!imuData.has_value()) {
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				imuData = mReader.getNextImuBatch();
+				imuData = mReader->getNextImuBatch();
 			}
 			while (imuData.has_value() && !imuData->empty() && timestamp >= imuData->back().timestamp) {
 				if (mImuPublisher.getNumSubscribers() > 0) {
@@ -666,7 +690,7 @@ void CaptureNode::imuPublisher() {
 				mCurrentSeek = imuData->back().timestamp;
 
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				imuData = mReader.getNextImuBatch();
+				imuData = mReader->getNextImuBatch();
 			}
 
 			// If value present but empty, we don't want to keep it for later spins.
@@ -681,13 +705,13 @@ void CaptureNode::imuPublisher() {
 void CaptureNode::triggerPublisher() {
 	ROS_INFO("Spinning triggerPublisher");
 
-	std::optional<dv::cvector<dv::Trigger>> triggerData = std::nullopt;
+	std::optional<std::vector<dv::Trigger>> triggerData = std::nullopt;
 
 	while (mSpinThread) {
 		mTriggerQueue.consume_all([&](const int64_t timestamp) {
 			if (!triggerData.has_value()) {
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				triggerData = mReader.getNextTriggerBatch();
+				triggerData = mReader->getNextTriggerBatch();
 			}
 			while (triggerData.has_value() && !triggerData->empty() && timestamp >= triggerData->back().timestamp) {
 				if (mTriggerPublisher.getNumSubscribers() > 0) {
@@ -699,7 +723,7 @@ void CaptureNode::triggerPublisher() {
 				mCurrentSeek = triggerData->back().timestamp;
 
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				triggerData = mReader.getNextTriggerBatch();
+				triggerData = mReader->getNextTriggerBatch();
 			}
 
 			// If value present but empty, we don't want to keep it for later spins.
@@ -716,13 +740,13 @@ void CaptureNode::eventsPublisher() {
 
 	std::optional<dv::EventStore> events = std::nullopt;
 
-	cv::Size resolution = mReader.getEventResolution().value();
+	cv::Size resolution = mReader->getEventResolution().value();
 
 	while (mSpinThread) {
 		mEventsQueue.consume_all([&](const int64_t timestamp) {
 			if (!events.has_value()) {
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				events = mReader.getNextEventBatch();
+				events = mReader->getNextEventBatch();
 			}
 			while (events.has_value() && !events->isEmpty() && timestamp >= events->getHighestTime()) {
 				dv::EventStore store;
@@ -742,7 +766,7 @@ void CaptureNode::eventsPublisher() {
 				mCurrentSeek = events->getHighestTime();
 
 				std::lock_guard<boost::recursive_mutex> lockGuard(mReaderMutex);
-				events = mReader.getNextEventBatch();
+				events = mReader->getNextEventBatch();
 			}
 
 			// If value present but empty, we don't want to keep it for later spins.
@@ -763,23 +787,25 @@ bool CaptureNode::isRunning() const {
 }
 
 void CaptureNode::runDiscovery(const std::string &syncServiceName) {
-	const auto &liveCapture = mReader.getCameraCapturePtr();
+	auto *liveCapture = dynamic_cast<dv::io::camera::CameraInputBase *>(mReader.get());
 
-	if (liveCapture == nullptr) {
+	if (!liveCapture) {
 		return;
 	}
 
+	auto *syncCamera = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
+
 	mDiscoveryPublisher = mNodeHandle->advertise<DiscoveryMessage>("/dvs/discovery", 10);
-	mDiscoveryThread    = std::make_unique<std::thread>([this, &liveCapture, &syncServiceName] {
+	mDiscoveryThread    = std::make_unique<std::thread>([this, &liveCapture, &syncCamera, &syncServiceName] {
         DiscoveryMessage message;
-        message.isMaster         = liveCapture->isMasterCamera();
-        message.name             = liveCapture->getCameraName();
-        message.startupTime      = startupTime;
-        message.publishingEvents = mParams.events;
-        message.publishingFrames = mParams.frames;
-        message.publishingImu    = mParams.imu;
+        message.isMaster           = (syncCamera) ? (syncCamera->isMaster()) : (true);
+        message.name               = liveCapture->getCameraName();
+        message.startupTime        = startupTime;
+        message.publishingEvents   = mParams.events;
+        message.publishingFrames   = mParams.frames;
+        message.publishingImu      = mParams.imu;
         message.publishingTriggers = mParams.triggers;
-        message.syncServiceTopic = syncServiceName;
+        message.syncServiceTopic   = syncServiceName;
         // 5 Hz is enough
         ros::Rate rate(5.0);
         while (mSpinThread) {
@@ -842,13 +868,14 @@ void CaptureNode::sendSyncCalls(const std::map<std::string, std::string> &servic
 		return;
 	}
 
-	const auto &liveCapture = mReader.getCameraCapturePtr();
+	auto *liveCapture = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
+
 	if (!liveCapture) {
 		return;
 	}
 
 	dv_ros_capture::SynchronizeCamera srv;
-	srv.request.timestampOffset  = liveCapture->getTimestampOffset();
+	srv.request.timestampOffset  = liveCapture->getTimestampOffset().count();
 	srv.request.masterCameraName = liveCapture->getCameraName();
 
 	for (const auto &[cameraName, serviceName] : serviceNames) {
@@ -872,8 +899,13 @@ void CaptureNode::sendSyncCalls(const std::map<std::string, std::string> &servic
 
 void CaptureNode::synchronizationThread() {
 	std::string serviceName;
-	const auto &liveCapture = mReader.getCameraCapturePtr();
-	if (liveCapture->isMasterCamera()) {
+	auto *liveCapture = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
+
+	if (!liveCapture) {
+		return;
+	}
+
+	if (liveCapture->isMaster()) {
 		// Wait for all cameras to show up
 		const auto syncServiceList = discoverSyncDevices();
 		runDiscovery(serviceName);

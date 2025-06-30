@@ -20,7 +20,7 @@ int main(int argc, char **argv) {
 	ros::NodeHandle nh("~");
 
 	dv::EventStreamSlicer slicer;
-	std::unique_ptr<dv::PixelAccumulator> accumulator = nullptr;
+	std::unique_ptr<dv::EdgeMapAccumulator> accumulator = nullptr;
 
 	dynamic_reconfigure::Server<dv_ros_accumulation::EdgeMapConfig> server;
 	auto framePublisher = nh.advertise<dv_ros_msgs::ImageMessage>("image", 10);
@@ -46,8 +46,8 @@ int main(int argc, char **argv) {
 			accumulator->setDecay(-1.f);
 		}
 		accumulator->setIgnorePolarity(config.rectify_polarity);
-		accumulator->setContribution(static_cast<float>(config.event_contribution));
-		accumulator->setNeutralValue(static_cast<float>(config.neutral_potential));
+		accumulator->setEventContribution(static_cast<float>(config.event_contribution));
+		accumulator->setNeutralPotential(static_cast<float>(config.neutral_potential));
 
 		switch (config.slice_method) {
 			case dv_ros_accumulation::EdgeMap_TIME: {
@@ -55,7 +55,7 @@ int main(int argc, char **argv) {
 				break;
 			}
 			case dv_ros_accumulation::EdgeMap_NUMBER: {
-				jobId = slicer.doEveryNumberOfEvents(config.accumulation_number, slicerCallback);
+				jobId = slicer.doEveryNumberOfElements(config.accumulation_number, slicerCallback);
 				break;
 			}
 			default:
@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
 	auto eventSubscriber = nh.subscribe<dv_ros_msgs::EventArrayMessage>(
 		"events", 200, [&slicer, &accumulator, &server, &reconfigureCallback](const auto &events) {
 			if (accumulator == nullptr) {
-				accumulator = std::make_unique<dv::PixelAccumulator>(cv::Size(events->width, events->height));
+				accumulator = std::make_unique<dv::EdgeMapAccumulator>(cv::Size(events->width, events->height));
 				server.setCallback(reconfigureCallback);
 			}
 

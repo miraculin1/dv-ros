@@ -12,7 +12,7 @@ find_package(
              dv_ros_messaging
              dv_ros_capture)
 
-find_package(dv-processing 1.4.0 REQUIRED)
+find_package(dv-processing 2.0.0 REQUIRED)
 
 add_message_files(FILES Depth.msg TimedKeypoint.msg TimedKeypointArray.msg)
 

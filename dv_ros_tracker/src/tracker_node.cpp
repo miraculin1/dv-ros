@@ -147,10 +147,10 @@ void TrackerNode::cameraInfoCallback(const dv_ros_msgs::CameraInfoMessage::Const
 	}
 
 	if (static_cast<std::string>(msgPtr->distortion_model) == sensor_msgs::distortion_models::EQUIDISTANT) {
-		mCameraCalibration.distortionModel = dv::camera::DistortionModel::Equidistant;
+		mCameraCalibration.distortionModel = dv::camera::DistortionModel::EQUIDISTANT;
 	}
 	else if (static_cast<std::string>(msgPtr->distortion_model) == sensor_msgs::distortion_models::PLUMB_BOB) {
-		mCameraCalibration.distortionModel = dv::camera::DistortionModel::RadTan;
+		mCameraCalibration.distortionModel = dv::camera::DistortionModel::RADIAL_TANGENTIAL;
 	}
 	else {
 		throw dv::exceptions::InvalidArgument<dv_ros_msgs::CameraInfoMessage::_distortion_model_type>(
@@ -204,7 +204,7 @@ void TrackerNode::createTracker() {
 	switch (mode) {
 		case OperationMode::EventsOnly: {
 			ROS_INFO("Constructing Events Only Tracker..");
-			auto eventTracker = dvf::EventFeatureLKTracker<dv::PixelAccumulator>::RegularTracker(
+			auto eventTracker = dvf::EventFeatureLKTracker<dv::EdgeMapAccumulator>::RegularTracker(
 				mCameraCalibration.resolution, mLucasKanadeConfig, nullptr, std::move(detector),
 				std::make_unique<dvf::FeatureCountRedetection>(mTrackingConfig.redetectionThreshold));
 			eventTracker->setMaxTracks(mTrackingConfig.maxTracks);
@@ -252,7 +252,7 @@ void TrackerNode::createTracker() {
 
 		case OperationMode::Combined: {
 			ROS_INFO("Constructing Combined Tracker..");
-			auto combinedTracker = dvf::EventCombinedLKTracker<dv::PixelAccumulator>::RegularTracker(
+			auto combinedTracker = dvf::EventCombinedLKTracker<dv::EdgeMapAccumulator>::RegularTracker(
 				mCameraCalibration.resolution, mLucasKanadeConfig, nullptr, std::move(detector),
 				std::make_unique<dvf::FeatureCountRedetection>(mTrackingConfig.redetectionThreshold));
 			combinedTracker->setMaxTracks(mTrackingConfig.maxTracks);
@@ -281,14 +281,14 @@ void TrackerNode::createTracker() {
 void TrackerNode::pushEventToTracker(const dv::EventStore &events) {
 	switch (mode) {
 		case OperationMode::EventsOnly:
-			dynamic_cast<dvf::EventFeatureLKTracker<dv::PixelAccumulator> *>(tracker.get())->accept(events);
+			dynamic_cast<dvf::EventFeatureLKTracker<dv::EdgeMapAccumulator> *>(tracker.get())->accept(events);
 			break;
 		case OperationMode::EventsOnlyCompensated:
 			dynamic_cast<dvf::EventFeatureLKTracker<dv::kinematics::MotionCompensator<>> *>(tracker.get())
 				->accept(events);
 			break;
 		case OperationMode::Combined:
-			dynamic_cast<dvf::EventCombinedLKTracker<dv::PixelAccumulator> *>(tracker.get())->accept(events);
+			dynamic_cast<dvf::EventCombinedLKTracker<dv::EdgeMapAccumulator> *>(tracker.get())->accept(events);
 			break;
 		case OperationMode::CombinedCompensated:
 			dynamic_cast<dvf::EventCombinedLKTracker<dv::kinematics::MotionCompensator<>> *>(tracker.get())
@@ -309,7 +309,7 @@ void TrackerNode::pushFrameToTracker(const dv::Frame &frame) {
 			dynamic_cast<dvf::ImageFeatureLKTracker *>(tracker.get())->accept(frame);
 			break;
 		case OperationMode::Combined:
-			dynamic_cast<dvf::EventCombinedLKTracker<dv::PixelAccumulator> *>(tracker.get())->accept(frame);
+			dynamic_cast<dvf::EventCombinedLKTracker<dv::EdgeMapAccumulator> *>(tracker.get())->accept(frame);
 			break;
 		case OperationMode::CombinedCompensated:
 			dynamic_cast<dvf::EventCombinedLKTracker<dv::kinematics::MotionCompensator<>> *>(tracker.get())
@@ -339,9 +339,9 @@ void TrackerNode::pushTransformToTracker(const dv::kinematics::Transformationf &
 	}
 }
 
-dv::cvector<dv::TimedKeyPoint> TrackerNode::undistortKeypoints(const dv::cvector<dv::TimedKeyPoint> &keypoints) {
+std::vector<dv::TimedKeyPoint> TrackerNode::undistortKeypoints(const std::vector<dv::TimedKeyPoint> &keypoints) {
 	static const auto mCamGeom                          = mCameraCalibration.getCameraGeometry();
-	dv::cvector<dv::TimedKeyPoint> undistortedKeypoints = keypoints;
+	std::vector<dv::TimedKeyPoint> undistortedKeypoints = keypoints;
 	for (auto &keypoint : undistortedKeypoints) {
 		keypoint.pt = mCamGeom.undistort<dv::Point2f>(keypoint.pt);
 	}
@@ -378,7 +378,7 @@ void TrackerNode::manageEventsQueue(const dv::EventStore &events) {
 			pushEventToTracker(events);
 			while (runTracking()) {
 				cv::Mat accumulatedImage
-					= dynamic_cast<dvf::EventFeatureLKTracker<dv::PixelAccumulator> *>(tracker.get())
+					= dynamic_cast<dvf::EventFeatureLKTracker<dv::EdgeMapAccumulator> *>(tracker.get())
 						  ->getAccumulatedFrame();
 				// publish accumulated image
 				publishEventsPreview(accumulatedImage);
@@ -392,7 +392,7 @@ void TrackerNode::manageEventsQueue(const dv::EventStore &events) {
 			while (!queueFrame.empty() && queueFrame.front().frame.timestamp < mLastEventsTimestamp) {
 				pushFrameToTracker(queueFrame.front().frame);
 				runTracking();
-				auto frames = dynamic_cast<dvf::EventCombinedLKTracker<dv::PixelAccumulator> *>(tracker.get())
+				auto frames = dynamic_cast<dvf::EventCombinedLKTracker<dv::EdgeMapAccumulator> *>(tracker.get())
 								  ->getAccumulatedFrames();
 				if (!frames.empty()) {
 					cv::Mat accumulatedImage = frames.back().pyramid.front();

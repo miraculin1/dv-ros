@@ -86,14 +86,14 @@ int main(int argc, char **argv) {
 		};
 	}
 
-	handler.mImuHandler = [&bag, &topicNamespace](const dv::cvector<dv::IMU> &imuBatch) {
+	handler.mImuHandler = [&bag, &topicNamespace](const std::vector<dv::IMU> &imuBatch) {
 		for (const auto &imu : imuBatch) {
 			auto msg = dv_ros_msgs::toRosImuMessage(imu);
 			bag.write(topicNamespace + "/imu", msg.header.stamp, msg);
 		}
 	};
 
-	handler.mTriggersHandler = [&bag, &topicNamespace](const dv::cvector<dv::Trigger> &triggerBatch) {
+	handler.mTriggersHandler = [&bag, &topicNamespace](const std::vector<dv::Trigger> &triggerBatch) {
 		for (const auto &trigger : triggerBatch) {
 			auto msg = dv_ros_msgs::toRosTriggerMessage(trigger);
 			bag.write(topicNamespace + "/triggers", msg.timestamp, msg);

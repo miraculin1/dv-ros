@@ -7,28 +7,20 @@ ROS drivers and sample nodes for iniVation cameras and DV software infrastructur
 The code depends on DV software libraries, these libraries need to be installed for the ROS nodes to compile. Enable the
 appropriate iniVation PPA depending on your Ubuntu distribution:
 
-- For Ubuntu 18.04:
+- For Ubuntu 20.04, 22.04 and 24.04:
 
 ```
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
-sudo add-apt-repository ppa:inivation-ppa/inivation-bionic
-sudo apt update
-sudo apt install dv-processing dv-runtime-dev gcc-10 g++-10
-```
-
-- For Ubuntu 20.04:
-
-```
 sudo add-apt-repository ppa:inivation-ppa/inivation
 sudo apt update
-sudo apt install dv-processing dv-runtime-dev gcc-10 g++-10
+sudo apt install dv-processing dv-runtime-dev gcc-13 g++-13
 ```
 
 Some extra ROS dependencies might also be needed:
 
 ```
 # Example for ROS Noetic on Ubuntu 20.04
-sudo apt install python3-catkin python3-catkin-tools ros-noetic-catkin ros-noetic-camera-info-manager
+sudo apt install python3-catkin python3-catkin-tools ros-noetic-catkin ros-noetic-camera-info-manager ros-noetic-tf2 ros-noetic-tf2-ros ros-noetic-tf2-sensor-msgs
 ```
 
 The project is build using catkin tools, run the following commands from your catkin workspace:
@@ -38,7 +30,7 @@ The project is build using catkin tools, run the following commands from your ca
 cd src
 git clone https://gitlab.com/inivation/dv/dv-ros.git
 cd ..
-catkin build --cmake-args -DCMAKE_C_COMPILER=gcc-10 -DCMAKE_CXX_COMPILER=g++-10
+catkin build --cmake-args -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
 ```
 
 ## Verifying the build

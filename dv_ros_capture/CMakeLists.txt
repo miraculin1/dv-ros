@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
-project(dv_ros_capture VERSION 1.2.0)
+project(dv_ros_capture VERSION 1.3.0)
 
-find_package(dv-processing 1.5.0 REQUIRED)
+find_package(dv-processing 2.0.0 REQUIRED)
 find_package(
   catkin REQUIRED
   COMPONENTS roscpp
@@ -41,8 +41,7 @@ catkin_package(
   geometry_msgs
   tf2_ros)
 
-set(SOURCE src/parameters_loader.cpp src/capture_node.cpp src/reader.cpp
-           src/main.cpp)
+set(SOURCE src/parameters_loader.cpp src/capture_node.cpp src/main.cpp)
 
 add_executable(capture_node ${SOURCE})
 

@@ -12,7 +12,7 @@ find_package(
              dv_ros_msgs
              dv_ros_messaging)
 
-find_package(dv-processing 1.4.0 REQUIRED)
+find_package(dv-processing 2.0.0 REQUIRED)
 
 catkin_package(CATKIN_DEPENDS message_runtime roscpp std_msgs sensor_msgs
                dv_ros_msgs)
