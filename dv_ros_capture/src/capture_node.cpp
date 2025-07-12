@@ -232,6 +232,29 @@ CaptureNode::CaptureNode(std::shared_ptr<ros::NodeHandle> nodeHandle, const dv_r
 		dvxplorer->setTimeInterval(std::chrono::microseconds{mParams.timeIncrement});
 	}
 
+	auto *dvxplorerm = dynamic_cast<dv::io::camera::DVXplorerM *>(mReader.get());
+	if (dvxplorerm != nullptr) {
+		// DVXplorer Mini/Micro type camera
+		dvxplorerServer = std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::DVXplorerConfig>>(
+			mReaderMutex, *mNodeHandle);
+
+		dv_ros_capture::DVXplorerConfig initialSettings = dv_ros_capture::DVXplorerConfig::__getDefault__();
+		initialSettings.noise_filtering                 = mParams.noiseFiltering;
+		initialSettings.noise_background_activity_time  = static_cast<int>(mParams.noiseBATime);
+
+		dvxplorerServer->updateConfig(initialSettings);
+		dvxplorerServer->setCallback([this, &dvxplorerm](const dv_ros_capture::DVXplorerConfig &config, uint32_t) {
+			dvxplorerm->setGlobalHold(config.global_hold);
+			dvxplorerm->setContrastThresholdOn(config.contrast_threshold_on);
+			dvxplorerm->setContrastThresholdOff(config.contrast_threshold_off);
+
+			updateNoiseFilter(config.noise_filtering, static_cast<int64_t>(config.noise_background_activity_time));
+		});
+
+		// Support variable data interval sizes.
+		dvxplorerm->setTimeInterval(std::chrono::microseconds{mParams.timeIncrement});
+	}
+
 	if (dynamic_cast<dv::io::MonoCameraRecording *>(mReader.get()) != nullptr) {
 		playbackServer
 			= std::make_unique<dynamic_reconfigure::Server<dv_ros_capture::PlaybackConfig>>(mReaderMutex, *mNodeHandle);

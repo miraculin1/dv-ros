@@ -3,8 +3,6 @@
 #include <dv-processing/camera/calibration_set.hpp>
 #include <dv-processing/camera/calibrations/camera_calibration.hpp>
 #include <dv-processing/core/core.hpp>
-#include <dv-processing/io/camera/davis.hpp>
-#include <dv-processing/io/camera/dvxplorer.hpp>
 #include <dv-processing/io/mono_camera_recording.hpp>
 #include <dv-processing/noise/background_activity_noise_filter.hpp>
 
