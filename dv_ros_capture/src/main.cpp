@@ -21,7 +21,8 @@ int main(int argc, char **argv) {
 
 	// Spin the node
 	node.startCapture();
-	// Sping ros
+
+	// Spin ros
 	while (ros::ok() && node.isRunning()) {
 		ros::spinOnce();
 		std::this_thread::sleep_for(1ms);

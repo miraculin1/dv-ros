@@ -86,7 +86,6 @@ int main(int argc, char **argv) {
 				accumulator = std::make_unique<dv::Accumulator>(cv::Size(events->width, events->height));
 				server.setCallback(reconfigureCallback);
 			}
-			auto store = dv_ros_msgs::toEventStore(*events);
 
 			try {
 				slicer.accept(dv_ros_msgs::toEventStore(*events));

@@ -370,7 +370,7 @@ bool CaptureNode::synchronizeCamera(
 
 	auto *liveCapture = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
 	if (!liveCapture) {
-		ROS_WARN("Received synchronization request on a non-live camera!");
+		ROS_WARN("Received synchronization request on a non-live/synchronizable camera!");
 		return true;
 	}
 	if (liveCapture->isRunning() && !liveCapture->isMaster()) {
@@ -925,6 +925,10 @@ void CaptureNode::synchronizationThread() {
 	auto *liveCapture = dynamic_cast<dv::io::camera::SyncCameraInputBase *>(mReader.get());
 
 	if (!liveCapture) {
+		// Cameras without synchronization support can just be considered done immediately.
+		if (dynamic_cast<dv::io::camera::CameraInputBase *>(mReader.get())) {
+			mSynchronized = true;
+		}
 		return;
 	}
 
